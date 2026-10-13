@@ -140,7 +140,28 @@ CREATE TABLE audit_log (
 );
 """
 
-MIGRATIONS: tuple[tuple[int, str], ...] = ((1, SCHEMA_V1),)
+SCHEMA_V2 = """
+-- System escrow account for market reservations.
+INSERT OR IGNORE INTO users(user_id, created_at) VALUES (0, strftime('%s','now'));
+INSERT OR IGNORE INTO accounts(user_id, kind, balance) VALUES (0, 'wallet', 0);
+INSERT OR IGNORE INTO accounts(user_id, kind, balance) VALUES (0, 'bank', 0);
+INSERT OR IGNORE INTO user_stats(user_id) VALUES (0);
+
+-- Order-book indexes.
+CREATE INDEX IF NOT EXISTS idx_market_book_buy
+  ON market_orders(item_id, side, status, price DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_market_book_sell
+  ON market_orders(item_id, side, status, price ASC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_market_user
+  ON market_orders(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_price_history_recent
+  ON price_history(item_id, history_id DESC);
+"""
+
+MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (1, SCHEMA_V1),
+    (2, SCHEMA_V2),
+)
 
 
 async def run_migrations(db: Database) -> None:

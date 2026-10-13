@@ -145,7 +145,7 @@ listed honestly in the [Roadmap](#-roadmap).
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-org/quadton.git
+git clone https://github.com/quadton/quadton-bot
 cd quadton
 
 python -m venv .venv

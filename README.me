@@ -1,0 +1,141 @@
+<div align="center">
+
+# ⬢ QUADTON
+
+**A persistent, gambling-free Discord economy & progression bot.**
+
+`1,250 QC` · `Quad Coins` · `Python 3.11+` · `discord.py 2.x` · `SQLite`
+
+![status](https://img.shields.io/badge/status-phase%201%20complete-2ea043)
+![license](https://img.shields.io/badge/license-MIT-blue)
+![python](https://img.shields.io/badge/python-3.11%2B-3776ab)
+![gambling](https://img.shields.io/badge/gambling-none-critical)
+
+</div>
+
+---
+
+## 📖 Table of Contents
+
+- [About](#-about)
+- [Status](#-status)
+- [Feature Overview](#-feature-overview)
+- [Screenshots](#-screenshots)
+- [Quick Start](#-quick-start)
+- [Configuration](#-configuration)
+- [Running Quadton](#-running-quadton)
+- [Command Reference](#-command-reference)
+- [Architecture](#-architecture)
+- [Database](#-database)
+- [Economy Design](#-economy-design)
+- [Security](#-security)
+- [Backup & Recovery](#-backup--recovery)
+- [Testing](#-testing)
+- [Deployment](#-deployment)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## 🎯 About
+
+**Quadton** is a persistent virtual economy game for Discord. Players earn
+**QC (Quad Coins)**, progress through careers, gather resources, complete
+achievements, and climb global leaderboards — all without a single gambling
+mechanic.
+
+> **QC is a virtual game currency.** It is not real money and cannot be
+> exchanged for real money. Quadton contains **no** casinos, slots, betting,
+> wagering, loot boxes, or paid randomized rewards of any kind.
+
+Quadton is designed for long-term operation on modest hardware, including
+**Linux ARM64** environments such as Alpine Linux inside Podroid, and small
+cloud VMs.
+
+---
+
+## 🚦 Status
+
+| Phase | Description                       | Status         |
+| :---: | :-------------------------------- | :------------- |
+|   1   | Core economy & progression        | ✅ **Complete** |
+|   2   | Market, crafting, businesses      | 🚧 Planned     |
+|   3   | RPG, pets, cards, guilds          | 🚧 Planned     |
+|   4   | Seasons, mastery, analytics       | 🚧 Planned     |
+
+**No Phase 2–4 feature is stubbed or faked.** Anything not yet built is
+listed honestly in the [Roadmap](#-roadmap).
+
+---
+
+## ✨ Feature Overview
+
+<table>
+<tr>
+<td valign="top" width="50%">
+
+### 💰 Economy
+- Central ledger with atomic transactions
+- Wallet & bank with deposit / withdraw
+- Player-to-player payments
+- Idempotency keys prevent duplicate payouts
+- Lifetime earned / spent tracking
+- Non-negative balance enforced at DB level
+
+### 💼 Careers
+- **10** distinct careers
+- XP, levels, promotions
+- Pay scaling with level
+- Per-career work cooldowns
+
+### 🎣 Gathering
+- Fishing, mining, treasure hunting
+- Weighted drop tables
+- Effect-based yield multipliers
+
+### 🧪 Items & Effects
+- 32 seeded items across 12 categories
+- 6 rarity tiers
+- Usable consumables (potions, food)
+- Persistent buffs with class stacking
+
+</td>
+<td valign="top" width="50%">
+
+### 🏆 Progression
+- **7 ranks**: Bronze → Champion
+- Documented score formula
+- 5 stat-driven achievements
+- Net worth breakdown
+
+### 📊 Leaderboards
+- Global net-worth ranking
+- Efficient indexed queries
+
+### ⏱️ Cooldowns
+- **Persistent** — survive restarts
+- Atomic check-grant-set
+- Race-condition proof
+
+### 🛡️ Administration
+- Audited admin give/take
+- SQLite integrity check
+- Verified backups
+- Effect purge
+
+### 🔒 Security
+- All secrets from environment
+- Log redaction filter
+- Parameterized SQL everywhere
+- No trust in user input
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🖼️ Screenshots
+
+> *Screenshots are illustrative. Quadton uses Discord embeds for all output.*

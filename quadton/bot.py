@@ -26,6 +26,7 @@ INITIAL_COGS = (
     "quadton.cogs.profile",
     "quadton.cogs.leaderboard",
     "quadton.cogs.admin",
+    "quadton.cogs.help",
 )
 
 

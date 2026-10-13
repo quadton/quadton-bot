@@ -13,6 +13,7 @@ from quadton.services.cooldowns import CooldownService
 from quadton.services.currency import CurrencyService
 from quadton.services.effects import EffectService
 from quadton.services.inventory import InventoryService
+from quadton.services.market import MarketService
 from quadton.services.networth import NetWorthService
 
 log = logging.getLogger(__name__)
@@ -25,8 +26,9 @@ INITIAL_COGS = (
     "quadton.cogs.minigames",
     "quadton.cogs.profile",
     "quadton.cogs.leaderboard",
-    "quadton.cogs.admin",
+    "quadton.cogs.market",
     "quadton.cogs.help",
+    "quadton.cogs.admin",
 )
 
 
@@ -42,6 +44,7 @@ class Quadton(commands.Bot):
         self.effects = EffectService(db)
         self.networth = NetWorthService(db)
         self.achievements = AchievementService(db)
+        self.market = MarketService(db, self.currency, self.inventory)
 
     async def setup_hook(self) -> None:
         await run_migrations(self.db)
@@ -55,7 +58,11 @@ class Quadton(commands.Bot):
             log.exception("Slash command sync failed: %s", exc)
 
     async def on_ready(self) -> None:
-        log.info("Quadton online as %s (%s)", self.user, self.user.id if self.user else "?")
+        log.info(
+            "Quadton online as %s (%s)",
+            self.user,
+            self.user.id if self.user else "?",
+        )
 
     async def close(self) -> None:
         try:

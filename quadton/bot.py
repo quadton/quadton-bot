@@ -10,11 +10,13 @@ from quadton.db.database import Database
 from quadton.db.migrations import run_migrations
 from quadton.services.achievements import AchievementService
 from quadton.services.cooldowns import CooldownService
+from quadton.services.crafting import CraftingService
 from quadton.services.currency import CurrencyService
 from quadton.services.effects import EffectService
 from quadton.services.inventory import InventoryService
 from quadton.services.market import MarketService
 from quadton.services.networth import NetWorthService
+from quadton.services.shop import ShopService
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +29,9 @@ INITIAL_COGS = (
     "quadton.cogs.profile",
     "quadton.cogs.leaderboard",
     "quadton.cogs.market",
+    "quadton.cogs.shop",
+    "quadton.cogs.crafting",
+    "quadton.cogs.perks",
     "quadton.cogs.help",
     "quadton.cogs.admin",
 )
@@ -45,6 +50,8 @@ class Quadton(commands.Bot):
         self.networth = NetWorthService(db)
         self.achievements = AchievementService(db)
         self.market = MarketService(db, self.currency, self.inventory)
+        self.shop = ShopService(db, self.currency, self.inventory)
+        self.crafting = CraftingService(db, self.currency, self.inventory)
 
     async def setup_hook(self) -> None:
         await run_migrations(self.db)

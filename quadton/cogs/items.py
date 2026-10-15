@@ -5,15 +5,18 @@ from discord import app_commands
 from discord.ext import commands
 
 from quadton.services.effects import ACTIVITY, ECONOMIC
+from quadton.ui.base import SelectView
+from quadton.ui.embeds import (
+    COLOR_MARKET,
+    empty_state,
+    error,
+    info,
+    qc,
+    success,
+)
 
-
-def fmt(n: int) -> str:
-    return f"{n:,} QC"
-
-
-# effect_type -> perk_class. Determines the stacking bucket.
 EFFECT_CLASS = {
-    "heal": None,          # instant, no persistence
+    "heal": None,
     "xp_boost": ACTIVITY,
     "focus": ACTIVITY,
     "prosperity": ECONOMIC,
@@ -25,26 +28,135 @@ class Items(commands.Cog):
     def __init__(self, bot) -> None:
         self.bot = bot
 
-    @app_commands.command(description="List your inventory.")
+    @app_commands.command(
+        name="inventory",
+        description="Browse your items with dropdown navigation.",
+    )
     async def inventory(self, interaction: discord.Interaction) -> None:
         entries = await self.bot.inventory.list_inventory(interaction.user.id)
         if not entries:
             await interaction.response.send_message(
-                "Your inventory is empty.", ephemeral=True
+                embed=empty_state("Your inventory is empty."), ephemeral=True
             )
             return
-        lines = []
-        for item_id, qty in entries:
+
+        options = []
+        for item_id, qty in entries[:25]:
             d = self.bot.inventory.item_def(item_id)
             name = d.name if d else item_id
-            lines.append(f"`{item_id}` — {name} x{qty}")
-        embed = discord.Embed(
-            title="Inventory", description="\n".join(lines), color=0x3498DB
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            options.append(
+                discord.SelectOption(
+                    label=f"{name} ×{qty}"[:100],
+                    value=item_id,
+                    description=(d.rarity.title() if d else "?")[:100],
+                )
+            )
 
-    @app_commands.command(description="Use an item from your inventory.")
-    @app_commands.describe(item_id="Item ID", quantity="How many to consume")
+        async def on_select(inter2: discord.Interaction, item_id: str) -> None:
+            await self._show_item(inter2, item_id)
+
+        view = SelectView(
+            interaction.user.id,
+            placeholder="Choose an item to inspect...",
+            options=options,
+            on_select=on_select,
+        )
+        embed = info(
+            "🎒 Inventory",
+            f"You own **{len(entries)}** distinct items. "
+            "Select one to inspect and act on it.",
+        )
+        embed.color = COLOR_MARKET
+        await view.start(interaction, embed=embed)
+
+    async def _show_item(
+        self, interaction: discord.Interaction, item_id: str
+    ) -> None:
+        definition = self.bot.inventory.item_def(item_id)
+        if definition is None:
+            await interaction.response.edit_message(
+                embed=error("Unknown item"), view=None
+            )
+            return
+        qty = await self.bot.inventory.get_quantity(interaction.user.id, item_id)
+        embed = discord.Embed(
+            title=definition.name,
+            description=definition.description,
+            color=COLOR_MARKET,
+        )
+        embed.add_field(name="Rarity", value=definition.rarity.title(), inline=True)
+        embed.add_field(name="Category", value=definition.category.title(), inline=True)
+        embed.add_field(name="Owned", value=str(qty), inline=True)
+        embed.add_field(name="Base value", value=qc(definition.base_value), inline=True)
+
+        actions: list[discord.SelectOption] = [
+            discord.SelectOption(label="← Back to inventory", value="back"),
+        ]
+        if definition.usable:
+            actions.append(
+                discord.SelectOption(label="Use 1", value=f"use:1:{item_id}")
+            )
+            if qty >= 5:
+                actions.append(
+                    discord.SelectOption(label="Use 5", value=f"use:5:{item_id}")
+                )
+
+        async def on_action(inter2: discord.Interaction, value: str) -> None:
+            if value == "back":
+                await self.inventory(inter2)  # reopen
+                return
+            parts = value.split(":", 2)
+            await self._do_use(inter2, parts[2], int(parts[1]))
+
+        view = SelectView(
+            interaction.user.id,
+            placeholder="Choose an action...",
+            options=actions,
+            on_select=on_action,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _do_use(
+        self, interaction: discord.Interaction, item_id: str, quantity: int
+    ) -> None:
+        definition = self.bot.inventory.item_def(item_id)
+        if definition is None or not definition.usable:
+            await interaction.response.send_message(
+                embed=error("Item is not usable"), ephemeral=True
+            )
+            return
+        effect_type = definition.effect or ""
+        try:
+            async with self.bot.db.transaction() as conn:
+                await self.bot.inventory.consume(
+                    conn, interaction.user.id, item_id, quantity
+                )
+                perk_class = EFFECT_CLASS.get(effect_type)
+                if perk_class is not None:
+                    await self.bot.effects.apply(
+                        conn,
+                        interaction.user.id,
+                        effect_type=effect_type,
+                        perk_class=perk_class,
+                        strength=definition.strength,
+                        source=item_id,
+                        duration=definition.duration,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            await interaction.response.send_message(
+                embed=error("Use failed", str(exc)), ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            embed=success(
+                "Item used",
+                f"Consumed **{quantity}× {definition.name}**.",
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="use", description="Consume a usable item.")
+    @app_commands.describe(item_id="Item ID", quantity="How many to use")
     async def use(
         self,
         interaction: discord.Interaction,
@@ -53,74 +165,25 @@ class Items(commands.Cog):
     ) -> None:
         if quantity <= 0:
             await interaction.response.send_message(
-                "Quantity must be positive.", ephemeral=True
+                embed=error("Quantity must be positive"), ephemeral=True
             )
             return
-        uid = interaction.user.id
-        definition = self.bot.inventory.item_def(item_id)
-        if definition is None:
-            await interaction.response.send_message("Unknown item.", ephemeral=True)
-            return
-        if not definition.usable:
-            await interaction.response.send_message(
-                "That item is not usable.", ephemeral=True
-            )
-            return
-        effect_type = definition.effect or ""
+        await self._do_use(interaction, item_id, quantity)
 
-        async def grant(conn):
-            await self.bot.inventory.consume(conn, uid, item_id, quantity)
-            perk_class = EFFECT_CLASS.get(effect_type)
-            if perk_class is None:
-                # Instant effect (e.g. heal). No persistent effect.
-                return
-            await self.bot.effects.apply(
-                conn,
-                uid,
-                effect_type=effect_type,
-                perk_class=perk_class,
-                strength=definition.strength,
-                source=item_id,
-                duration=definition.duration,
-            )
-
-        try:
-            async with self.bot.db.transaction() as conn:
-                await grant(conn)
-        except Exception as e:
-            await interaction.response.send_message(
-                f"Use failed: {e}", ephemeral=True
-            )
-            return
-        if EFFECT_CLASS.get(effect_type) is None:
-            await interaction.response.send_message(
-                f"Used {quantity}x **{definition.name}** ({effect_type}).",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                f"Used {quantity}x **{definition.name}**. "
-                f"Effect `{effect_type}` active for {definition.duration}s.",
-                ephemeral=True,
-            )
-
-    @app_commands.command(description="Show your active effects.")
+    @app_commands.command(name="effects", description="Show active effects.")
     async def effects(self, interaction: discord.Interaction) -> None:
         active = await self.bot.effects.active_effects(interaction.user.id)
         if not active:
             await interaction.response.send_message(
-                "No active effects.", ephemeral=True
+                embed=empty_state("No active effects."), ephemeral=True
             )
             return
-        lines = []
-        for e in active:
-            lines.append(
-                f"**{e['effect_type']}** ({e['perk_class']}) "
-                f"+{int(e['strength'] * 100)}% until <t:{e['expires_at']}:R>"
-            )
-        embed = discord.Embed(
-            title="Active Effects", description="\n".join(lines), color=0x1ABC9C
-        )
+        lines = [
+            f"**{e['effect_type']}** ({e['perk_class']}) "
+            f"+{int(e['strength'] * 100)}% — expires <t:{e['expires_at']}:R>"
+            for e in active
+        ]
+        embed = info("Active Effects", "\n".join(lines))
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

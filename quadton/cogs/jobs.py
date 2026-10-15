@@ -5,97 +5,192 @@ from discord import app_commands
 from discord.ext import commands
 
 from quadton.data.jobs import JOBS, by_id, pay_for, xp_needed
-
-
-def fmt(n: int) -> str:
-    return f"{n:,} QC"
+from quadton.ui.base import SelectView
+from quadton.ui.embeds import COLOR_MARKET, error, info, qc, success
 
 
 class Jobs(commands.Cog):
     def __init__(self, bot) -> None:
         self.bot = bot
 
-    @app_commands.command(description="List available careers.")
+    @app_commands.command(
+        name="jobs",
+        description="Browse careers with a dropdown.",
+    )
     async def jobs(self, interaction: discord.Interaction) -> None:
-        lines = [
-            f"`{j.job_id}` — **{j.name}** · base {j.base_pay} QC / "
-            f"{j.cooldown // 60}m — {j.description}"
+        options = [
+            discord.SelectOption(
+                label=j.name[:100],
+                value=j.job_id,
+                description=f"Base {j.base_pay} QC · {j.cooldown // 60}m cooldown",
+            )
             for j in JOBS
         ]
-        embed = discord.Embed(
-            title="Careers", description="\n".join(lines), color=0x8E44AD
-        )
-        await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(description="Choose your career.")
-    @app_commands.describe(job_id="Career ID (see /jobs)")
-    async def job_change(
+        async def on_select(inter2: discord.Interaction, job_id: str) -> None:
+            await self._show_job(inter2, job_id)
+
+        view = SelectView(
+            interaction.user.id,
+            placeholder="Choose a career to inspect...",
+            options=options,
+            on_select=on_select,
+        )
+        embed = info(
+            "💼 Careers",
+            "Pick a career to see its pay, cooldown, and progression.",
+        )
+        embed.color = COLOR_MARKET
+        await view.start(interaction, embed=embed)
+
+    async def _show_job(
         self, interaction: discord.Interaction, job_id: str
     ) -> None:
-        uid = interaction.user.id
+        job = by_id(job_id)
+        if job is None:
+            await interaction.response.edit_message(
+                embed=error("Unknown career"), view=None
+            )
+            return
+        embed = discord.Embed(
+            title=job.name,
+            description=job.description,
+            color=COLOR_MARKET,
+        )
+        embed.add_field(name="Base pay", value=qc(job.base_pay))
+        embed.add_field(name="Cooldown", value=f"{job.cooldown // 60} min")
+        embed.add_field(name="XP per shift", value=str(job.xp_per_work))
+        embed.add_field(name="Max level", value=str(job.max_level))
+        embed.add_field(
+            name="Pay at level 10",
+            value=qc(pay_for(job, 10)),
+        )
+        embed.add_field(
+            name="XP for level 2",
+            value=str(xp_needed(1)),
+        )
+
+        actions = [
+            discord.SelectOption(label="Apply for this career", value="apply"),
+            discord.SelectOption(label="← Back to careers", value="back"),
+        ]
+
+        async def on_action(inter2: discord.Interaction, value: str) -> None:
+            if value == "back":
+                await self.jobs(inter2)
+                return
+            await self._apply(inter2, job_id)
+
+        view = SelectView(
+            interaction.user.id,
+            placeholder="Choose an action...",
+            options=actions,
+            on_select=on_action,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _apply(
+        self, interaction: discord.Interaction, job_id: str
+    ) -> None:
         job = by_id(job_id)
         if job is None:
             await interaction.response.send_message(
-                "Unknown career.", ephemeral=True
+                embed=error("Unknown career"), ephemeral=True
             )
             return
         async with self.bot.db.transaction() as conn:
-            await self.bot.currency.ensure_user(conn, uid)
+            await self.bot.currency.ensure_user(conn, interaction.user.id)
             await conn.execute(
                 """
                 INSERT INTO user_jobs(user_id, job_id) VALUES (?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     job_id=excluded.job_id, level=1, xp=0, promotions=0
                 """,
-                (uid, job.job_id),
+                (interaction.user.id, job.job_id),
             )
         await interaction.response.send_message(
-            f"You are now a **{job.name}**. Progress reset to level 1.",
+            embed=success(
+                "Career updated",
+                f"You are now a **{job.name}**. Progress reset to level 1.",
+            ),
             ephemeral=True,
         )
 
-    @app_commands.command(description="Show your current career.")
+    @app_commands.command(name="job-change", description="Choose a career by ID.")
+    @app_commands.describe(job_id="Career ID (e.g. miner, chef)")
+    async def job_change(
+        self, interaction: discord.Interaction, job_id: str
+    ) -> None:
+        job = by_id(job_id)
+        if job is None:
+            await interaction.response.send_message(
+                embed=error("Unknown career"), ephemeral=True
+            )
+            return
+        async with self.bot.db.transaction() as conn:
+            await self.bot.currency.ensure_user(conn, interaction.user.id)
+            await conn.execute(
+                """
+                INSERT INTO user_jobs(user_id, job_id) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    job_id=excluded.job_id, level=1, xp=0, promotions=0
+                """,
+                (interaction.user.id, job.job_id),
+            )
+        await interaction.response.send_message(
+            embed=success("Career updated", f"You are now a **{job.name}**."),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="career", description="Your current career.")
     async def career(self, interaction: discord.Interaction) -> None:
-        uid = interaction.user.id
         row = await self.bot.db.fetchone(
             "SELECT job_id, level, xp, promotions FROM user_jobs WHERE user_id=?",
-            (uid,),
+            (interaction.user.id,),
         )
         if row is None:
             await interaction.response.send_message(
-                "You have no career. Use `/job-change` first.", ephemeral=True
+                embed=info(
+                    "No career",
+                    "Use `/jobs` to browse and apply for a career.",
+                ),
+                ephemeral=True,
             )
             return
         job = by_id(row["job_id"])
         if job is None:
             await interaction.response.send_message(
-                "Your career is invalid; pick a new one.", ephemeral=True
+                embed=error("Career invalid — pick a new one."),
+                ephemeral=True,
             )
             return
-        need = xp_needed(int(row["level"]))
-        pay = pay_for(job, int(row["level"]))
-        embed = discord.Embed(title=job.name, color=0xE67E22)
+        embed = info(job.name)
         embed.add_field(name="Level", value=str(row["level"]))
-        embed.add_field(name="XP", value=f"{row['xp']} / {need}")
-        embed.add_field(name="Pay per shift", value=fmt(pay))
+        embed.add_field(
+            name="XP", value=f"{row['xp']} / {xp_needed(int(row['level']))}"
+        )
+        embed.add_field(
+            name="Pay per shift", value=qc(pay_for(job, int(row["level"])))
+        )
         embed.add_field(name="Promotions", value=str(row["promotions"]))
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(description="Work a shift at your current job.")
+    @app_commands.command(name="work", description="Work one shift.")
     async def work(self, interaction: discord.Interaction) -> None:
         uid = interaction.user.id
         row = await self.bot.db.fetchone(
-            "SELECT job_id, level, xp FROM user_jobs WHERE user_id=?", (uid,)
+            "SELECT job_id, level FROM user_jobs WHERE user_id=?", (uid,)
         )
         if row is None:
             await interaction.response.send_message(
-                "You have no career. Use `/job-change` first.", ephemeral=True
+                embed=error("You have no career. Use `/jobs` first."),
+                ephemeral=True,
             )
             return
         job = by_id(row["job_id"])
         if job is None:
             await interaction.response.send_message(
-                "Your career is invalid; pick a new one.", ephemeral=True
+                embed=error("Career invalid — pick a new one."), ephemeral=True
             )
             return
         level = int(row["level"])
@@ -110,8 +205,7 @@ class Jobs(commands.Cog):
                 conn, uid, pay, "JOB_REWARD", count_as_earned=True
             )
             await conn.execute(
-                "UPDATE user_stats SET jobs_completed = jobs_completed + 1 "
-                "WHERE user_id=?",
+                "UPDATE user_stats SET jobs_completed = jobs_completed + 1 WHERE user_id=?",
                 (uid,),
             )
             await conn.execute(
@@ -125,12 +219,19 @@ class Jobs(commands.Cog):
         if not status.ready:
             m, s = divmod(status.remaining, 60)
             await interaction.response.send_message(
-                f"Shift cooldown: {m}m {s}s remaining.", ephemeral=True
+                embed=error(
+                    "Shift cooldown",
+                    f"{m}m {s}s remaining before your next shift.",
+                ),
+                ephemeral=True,
             )
             return
         await self.bot.achievements.check_and_grant(uid)
         await interaction.response.send_message(
-            f"Worked a shift as **{job.name}** and earned **{fmt(pay)}** (+{xp_gain} XP)."
+            embed=success(
+                f"Worked as {job.name}",
+                f"Earned **{qc(pay)}** and gained **{xp_gain} XP**.",
+            )
         )
 
     async def _try_levelup(self, conn, uid: int) -> None:
